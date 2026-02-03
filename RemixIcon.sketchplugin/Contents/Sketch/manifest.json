@@ -1,0 +1,25 @@
+{
+  "name": "Remix Icon Search",
+  "identifier": "com.funkyplugins.remixicon",
+  "version": "1.0",
+  "description": "Search and insert Remix Icons into Sketch",
+  "author": "Dmytro Shevchuk",
+  "icon": "icon.png",
+  "compatibleVersion": 100,
+  "commands": [
+    {
+      "name": "Search Icons",
+      "identifier": "search",
+      "script": "remix-icon.js",
+      "handlers": {
+        "run": "onRun"
+      }
+    }
+  ],
+  "menu": {
+    "title": "🅡 Remix Icon",
+    "items": [
+      "search"
+    ]
+  }
+}

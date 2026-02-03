@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { 
+      font-family: -apple-system, sans-serif; margin: 0; padding: 0; background: #f8f9fa; 
+      user-select: none; -webkit-user-select: none; -ms-user-select: none;
+    }
+    
+    input[type="text"] { user-select: text; -webkit-user-select: text; }
+    
+    .header-container { 
+      position: sticky; top: 0; background: #fff; padding: 10px 20px 15px 20px; z-index: 100;
+      border-bottom: 1px solid #eee; box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    }
+    
+    .search-wrapper { margin-bottom: 12px; position: relative; }
+    input[type="text"] { 
+      width: 100%; padding: 10px 40px 10px 15px; border: 1px solid #ddd; border-radius: 8px; 
+      font-size: 14px; box-sizing: border-box; outline: none; transition: border 0.2s;
+    }
+    input[type="text"]:focus { border-color: #007bff; }
+    
+    .palette-container { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .swatch { 
+      width: 22px; height: 22px; border-radius: 50%; cursor: pointer; 
+      border: 2px solid transparent; transition: transform 0.1s;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.1);
+    }
+    .swatch:hover { transform: scale(1.2); }
+    .swatch.active { border-color: #007bff; transform: scale(1.1); box-shadow: 0 0 0 2px rgba(0,123,255,0.2); }
+
+    .icons-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 15px; padding: 20px; background: #f8f9fa; min-height: 100vh; align-content: start; }
+    .icon-item { background: white; border: 1px solid #eee; border-radius: 8px; padding: 10px; text-align: center; cursor: pointer; transition: all 0.2s; }
+    .icon-item:hover { border-color: #007bff; box-shadow: 0 4px 12px rgba(0,0,0,0.08); transform: translateY(-2px); }
+    .icon-item img { width: 32px; height: 32px; margin-bottom: 8px; pointer-events: none; }
+    .icon-name { font-size: 10px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    
+    .no-results { grid-column: 1/-1; text-align: center; padding: 40px; color: #999; font-size: 14px; }
+
+    #loader {
+      display: none;
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      margin-top: -11px;
+      width: 18px;
+      height: 18px;
+      border: 2px solid #007bff;
+      border-top: 2px solid #fff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      z-index: 10;
+      pointer-events: none;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    
+    .loading-grid .icon-item img { opacity: 0; }
+    .loading-grid .icon-item { background: #f0f0f0; border-color: transparent; }
+  </style>
+  <script src="icons-data.js"></script>
+</head>
+<body>
+  <div class="header-container">
+    <div class="search-wrapper">
+      <input type="text" id="search" placeholder="Search icons..." autofocus 
+             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      <div id="loader"></div>
+    </div>
+    <div class="palette-container" id="palette"></div>
+  </div>
+  <div class="icons-grid" id="grid"></div>
+
+  <script>
+    const VERSION = '4.9.1';
+    let ALL_ICONS = [];
+    let selectedColor = '#000000';
+    let searchTimeout = null;
+    
+    const PRESET_COLORS = [
+      '#000000', '#666666', '#999999', '#FFFFFF', 
+      '#F44336', '#E91E63', '#9C27B0', '#673AB7', 
+      '#3F51B5', '#2196F3', '#00BCD4', '#4CAF50', 
+      '#FFEB3B', '#FF9800'
+    ];
+
+    const grid = document.getElementById('grid');
+    const searchInput = document.getElementById('search');
+    const palette = document.getElementById('palette');
+    const loader = document.getElementById('loader');
+
+    function createPalette() {
+      PRESET_COLORS.forEach(color => {
+        const div = document.createElement('div');
+        div.className = 'swatch' + (color === selectedColor ? ' active' : '');
+        div.style.backgroundColor = color;
+        div.onclick = () => setColor(color, div);
+        palette.appendChild(div);
+      });
+    }
+
+    function setColor(color, element) {
+      selectedColor = color;
+      document.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
+      if (element) element.classList.add('active');
+    }
+
+    function init() {
+      createPalette();
+      const data = window.REMIX_ICONS_DATA;
+      if (data) {
+        loadIconsFromData(data);
+        render(ALL_ICONS.slice(0, 100));
+      }
+      fetchLatestIcons();
+    }
+    
+    function loadIconsFromData(data) {
+      const iconSet = new Set();
+      ALL_ICONS = []; 
+      
+      for (const category in data) {
+        if (category === '_comment') continue;
+        const categoryIcons = data[category];
+        for (const baseName in categoryIcons) {
+          const tags = categoryIcons[baseName].split(',').map(t => t.trim().toLowerCase());
+          
+          const variations = [baseName];
+          if (!baseName.endsWith('-line') && !baseName.endsWith('-fill')) {
+            variations.push(baseName + '-line');
+            variations.push(baseName + '-fill');
+          }
+          
+          variations.forEach(v => {
+            const key = `${category}:${v}`;
+            if (!iconSet.has(key)) {
+              ALL_ICONS.push({ name: v, category: category, tags: tags });
+              iconSet.add(key);
+            }
+          });
+        }
+      }
+    }
+    
+    async function fetchLatestIcons() {
+      try {
+        const url = 'https://raw.githubusercontent.com/Remix-Design/remixicon/master/tags.json';
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+          console.log('Could not fetch latest icons, using built-in data');
+          return;
+        }
+        
+        const freshData = await response.json();
+        const oldCount = ALL_ICONS.length;
+        
+        loadIconsFromData(freshData);
+        
+        const newCount = ALL_ICONS.length;
+        if (newCount > oldCount) {
+          console.log(`Updated! Found ${newCount - oldCount} new icons`);
+          // Re-render if user hasn't searched yet
+          if (!searchInput.value.trim()) {
+            render(ALL_ICONS.slice(0, 100));
+          }
+        }
+      } catch (e) {
+        console.log('Failed to fetch latest icons:', e);
+      }
+    }
+
+    function render(icons) {
+      loader.style.display = 'block';
+      grid.classList.add('loading-grid');
+      
+      if (icons.length === 0) {
+        grid.innerHTML = '<div class="no-results">No icons found</div>';
+        loader.style.display = 'none';
+        return;
+      }
+      
+      grid.innerHTML = icons.map(icon => {
+        const encodedCat = encodeURIComponent(icon.category);
+        const url = `https://cdn.jsdelivr.net/npm/remixicon@${VERSION}/icons/${encodedCat}/${icon.name}.svg`;
+        return `
+          <div class="icon-item" onclick="handleIconClick('${icon.category}', '${icon.name}')">
+            <img src="${url}" onload="this.style.opacity=1" onerror="this.parentElement.style.display='none'">
+            <div class="icon-name" title="${icon.name}">${icon.name}</div>
+          </div>
+        `;
+      }).join('');
+
+      // Hide loader after a short delay to allow UI to settle
+      setTimeout(() => {
+        loader.style.display = 'none';
+        grid.classList.remove('loading-grid');
+      }, 300);
+    }
+
+    async function handleIconClick(category, name) {
+      const encodedCat = encodeURIComponent(category);
+      const url = `https://cdn.jsdelivr.net/npm/remixicon@${VERSION}/icons/${encodedCat}/${name}.svg`;
+
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Not found');
+        let svg = await response.text();
+        
+        const color = selectedColor;
+        if (svg.includes('fill="currentColor"')) {
+          svg = svg.replace(/fill="currentColor"/g, `fill="${color}"`);
+        } else if (svg.includes('fill="none"')) {
+          svg = svg.replace(/fill="none"/g, `fill="none" stroke="${color}"`);
+        } else {
+          svg = svg.replace('<svg ', `<svg fill="${color}" `);
+        }
+
+        alert('insert-svg:' + JSON.stringify({ name, svg }));
+      } catch (e) {
+        alert('error:Failed to load SVG');
+      }
+    }
+
+    searchInput.addEventListener('input', (e) => {
+      clearTimeout(searchTimeout);
+      const q = e.target.value.toLowerCase().trim();
+      
+      // Debounce search to prevent flickering
+      searchTimeout = setTimeout(() => {
+        if (!q) { 
+          render(ALL_ICONS.slice(0, 100)); 
+          return; 
+        }
+        const filtered = ALL_ICONS.filter(i => 
+          i.name.includes(q) || 
+          i.tags.some(t => t.includes(q)) || 
+          i.category.toLowerCase().includes(q)
+        );
+        render(filtered.slice(0, 200));
+      }, 250);
+    });
+
+    init();
+  </script>
+</body>
+</html>
